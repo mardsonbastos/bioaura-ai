@@ -16,7 +16,7 @@ def login():
         u=st.text_input("Usuário")
         p=st.text_input("Senha", type="password")
         if st.form_submit_button("Entrar", type="primary"):
-            if u == os.getenv("APP_USER","mardson") and p == os.getenv("APP_PASSWORD","troque-esta-senha"):
+            if u == "mardson" and p == "239899SSPrr":
                 st.session_state.logged=True
                 st.rerun()
             else: st.error("Usuário ou senha inválidos.")
