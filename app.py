@@ -1,0 +1,113 @@
+import os
+import streamlit as st
+from database import init_db, add_patient, list_patients, get_patient, add_assessment, list_assessments
+from ia import analyze_case
+from pdf import generate_pdf
+
+st.set_page_config(page_title="BioAura AI", page_icon="🧬", layout="wide", initial_sidebar_state="collapsed")
+init_db()
+
+PROFISSIONAL = os.getenv("PROFISSIONAL", "Enf. Mardson Bastos Rodrigues")
+REGISTRO = os.getenv("REGISTRO", "COREN-RR 625485")
+
+def login():
+    st.markdown("<div class='login'><h1>🧬 BioAura AI</h1><p>Plataforma clínica inteligente</p></div>", unsafe_allow_html=True)
+    with st.form("login"):
+        u=st.text_input("Usuário")
+        p=st.text_input("Senha", type="password")
+        if st.form_submit_button("Entrar", type="primary"):
+            if u == os.getenv("APP_USER","mardson") and p == os.getenv("APP_PASSWORD","troque-esta-senha"):
+                st.session_state.logged=True
+                st.rerun()
+            else: st.error("Usuário ou senha inválidos.")
+
+if "logged" not in st.session_state: st.session_state.logged=False
+if not st.session_state.logged:
+    login(); st.stop()
+
+st.markdown("""
+<style>
+.block-container{padding:1rem;max-width:1200px}
+.login{text-align:center;padding:2rem 0}
+div[data-testid="stMetric"]{border:1px solid #ddd;border-radius:12px;padding:10px}
+@media (max-width:700px){.block-container{padding:.7rem}.stButton button{width:100%}}
+</style>
+""", unsafe_allow_html=True)
+
+st.title("🧬 BioAura AI")
+st.caption(f"{PROFISSIONAL} • {REGISTRO}")
+
+with st.sidebar:
+    st.header("Menu")
+    page=st.radio("Ir para",["🏠 Dashboard","👤 Pacientes","🧪 Nova avaliação","📂 Histórico","💧 Protocolos"])
+    if st.button("🚪 Sair"):
+        st.session_state.logged=False; st.rerun()
+
+patients=list_patients()
+
+if page=="🏠 Dashboard":
+    c1,c2,c3=st.columns(3)
+    c1.metric("Pacientes",len(patients))
+    c2.metric("Avaliações",sum(len(list_assessments(p[0])) for p in patients))
+    c3.metric("IA","Ativa" if os.getenv("OPENAI_API_KEY") else "Não configurada")
+    st.info("Use o menu para cadastrar pacientes e iniciar avaliações.")
+
+elif page=="👤 Pacientes":
+    st.header("Cadastro de pacientes")
+    with st.form("novo"):
+        nome=st.text_input("Nome completo *")
+        cpf=st.text_input("CPF")
+        nasc=st.text_input("Data de nascimento")
+        if st.form_submit_button("Salvar paciente"):
+            if not nome.strip(): st.error("Nome é obrigatório.")
+            else:
+                try:
+                    add_patient(nome.strip(),cpf.strip(),nasc.strip())
+                    st.success("Paciente cadastrado.")
+                    st.rerun()
+                except Exception as e: st.error("Não foi possível salvar. Verifique se o CPF já está cadastrado.")
+    st.subheader("Pacientes cadastrados")
+    for p in patients:
+        st.write(f"**{p[1]}** — CPF: {p[2] or 'não informado'}")
+
+elif page=="🧪 Nova avaliação":
+    st.header("Nova avaliação")
+    if not patients:
+        st.warning("Cadastre um paciente primeiro."); st.stop()
+    labels={p[1]:p[0] for p in patients}
+    nome=st.selectbox("Paciente",list(labels))
+    queixas=st.text_area("Queixas e informações relatadas")
+    exames=st.text_area("Exames laboratoriais / resultados",height=180,placeholder="Cole aqui os resultados e respectivas unidades/referências.")
+    observacoes=st.text_area("Observações profissionais",height=120)
+    if st.button("🤖 Gerar análise assistida por IA",type="primary"):
+        if not os.getenv("OPENAI_API_KEY"):
+            st.error("Configure OPENAI_API_KEY no ambiente do servidor.")
+        else:
+            with st.spinner("Organizando informações..."):
+                resultado=analyze_case(nome,queixas,exames,observacoes)
+            st.session_state["ultima_analise"]=resultado
+            st.session_state["ultimo_paciente"]=(labels[nome],nome,queixas,exames,observacoes)
+            st.success("Análise gerada para revisão profissional.")
+    if "ultima_analise" in st.session_state:
+        st.subheader("Resultado da IA — revisão profissional")
+        st.markdown(st.session_state["ultima_analise"])
+        if st.button("💾 Salvar no histórico"):
+            pid,nome,q,e,o=st.session_state["ultimo_paciente"]
+            add_assessment(pid,q,e,o,st.session_state["ultima_analise"])
+            st.success("Avaliação salva.")
+        pdf=generate_pdf(st.session_state["ultimo_paciente"][1],st.session_state["ultima_analise"],PROFISSIONAL,REGISTRO)
+        st.download_button("📄 Gerar PDF",pdf,"bioaura_relatorio.pdf","application/pdf")
+
+elif page=="📂 Histórico":
+    st.header("Histórico")
+    if not patients: st.info("Nenhum paciente cadastrado.")
+    for p in patients:
+        with st.expander(p[1]):
+            for a in list_assessments(p[0]):
+                st.caption(a[1])
+                st.markdown(a[5] or "Sem análise.")
+
+elif page=="💧 Protocolos":
+    st.header("Protocolos")
+    st.info("Área preparada para cadastrar protocolos e rotinas. Para segurança, este módulo não prescreve automaticamente doses, medicamentos ou injetáveis.")
+    st.text_area("Novo protocolo / observações",height=180)
