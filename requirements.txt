@@ -3,3 +3,7 @@ openai
 reportlab
 PyPDF2
 python-dotenv
+pandas
+numpy
+matplotlib
+plotly
